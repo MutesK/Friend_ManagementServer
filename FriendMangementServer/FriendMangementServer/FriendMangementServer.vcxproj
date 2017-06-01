@@ -143,12 +143,14 @@
   <ItemGroup>
     <ClInclude Include="json.h" />
     <ClInclude Include="Protocol.h" />
+    <ClInclude Include="RingBuffer.h" />
     <ClInclude Include="SerializeBuffer.h" />
     <ClInclude Include="Server.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="json.cpp" />
     <ClCompile Include="main.cpp" />
+    <ClCompile Include="RingBuffer.cpp" />
     <ClCompile Include="SerializeBuffer.cpp" />
     <ClCompile Include="Server.cpp" />
   </ItemGroup>

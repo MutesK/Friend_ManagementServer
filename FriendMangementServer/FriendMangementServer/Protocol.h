@@ -9,7 +9,6 @@
 #define dfNICK_MAX_LEN		20
 #define dfPACKET_CODE		0x89
 
-#include <Windows.h>
 
 //------------------------------------------------------
 //  패킷헤더
@@ -139,7 +138,7 @@ struct st_PACKET_HEADER
 // 친구목록 결과
 //
 // {
-//		BYTE	FriendCount
+//		UINT	FriendCount
 //		{
 //			UINT64					FriendAccountNo
 //			WCHAR[dfNICK_MAX_LEN]	NickName
@@ -155,7 +154,7 @@ struct st_PACKET_HEADER
 // 친구요청 받은거 목록  요청
 //
 // {
-//		UINT64	AccountNo
+//		없음
 // }
 //------------------------------------------------------------
 #define df_REQ_FRIEND_REPLY_LIST		16
@@ -164,7 +163,7 @@ struct st_PACKET_HEADER
 // 친구목록 결과
 //
 // {
-//		BYTE	FriendCount
+//		UINT	FriendCount
 //		{
 //			UINT64					FriendAccountNo
 //			WCHAR[dfNICK_MAX_LEN]	NickName
@@ -310,15 +309,11 @@ struct st_PACKET_HEADER
 
 
 
-
-
-
-
 //------------------------------------------------------------
 // 스트레스 테스트용 에코
 //
 // {
-//			WORD		Size Byte
+//			WORD		Size
 //			Size		문자열 (WCHAR 유니코드)
 // }
 //------------------------------------------------------------
@@ -328,7 +323,7 @@ struct st_PACKET_HEADER
 // 스트레스 테스트용 에코응답
 //
 // {
-//			WORD		Size Byte
+//			WORD		Size
 //			Size		문자열 (WCHAR 유니코드)
 // }
 //------------------------------------------------------------

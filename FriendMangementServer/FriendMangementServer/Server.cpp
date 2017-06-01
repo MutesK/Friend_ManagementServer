@@ -3,10 +3,7 @@
 #include <algorithm>
 using namespace std;
 
-map<UINT64, st_CLIENT *> g_ClientMap;
-map<UINT64, st_Account *> g_AccountMap;
-
-
+char gData[10000];
 // 이미 만들어진 친구목록 <From, 친구 구조체>
 multimap<UINT64, st_Friend *> g_FriendMap; 
 // 친구요청 <From, 친구 요청 구조체>
@@ -18,9 +15,54 @@ multimap<UINT64, UINT64> g_RequestTo;
 
 SOCKET g_ListenSocket;
 
-UINT64 g_ClientNo = 0;
+UINT64 g_ClientNo = 0;  // 총 연결된 클라이언트 수
 UINT64 g_AccountNo = 0;
 
+UINT g_RecvCount = 0;
+UINT g_SendCount = 0;
+
+map<UINT64, st_CLIENT *> g_ClientMap;
+map<UINT64, st_Account *> g_AccountMap;
+
+void Draw()
+{
+	wprintf(L"Connected : %d \n", g_ClientNo);
+
+	if (g_ClientNo > 0)
+	{
+		wprintf(L"ProcessCount: Send[%d Cnt/Sec], Recv[%d Cnt/Sec], Total[%d Cnt/Sec]  \n", g_RecvCount, g_SendCount, g_RecvCount + g_SendCount);
+		g_RecvCount = 0;
+		g_SendCount = 0;
+	}
+}
+void NetworkClear()
+{
+	for_each(g_ClientMap.begin(), g_ClientMap.end(), [](pair<UINT64, st_CLIENT *> pairs)
+	{
+		DisconnectClient(pairs.first);
+	});
+}
+int recvn(SOCKET s, char *buf, int len, int flags)
+{
+	int received; // recv 함수의 리턴값
+	char *ptr = buf; // buf index pointer
+	int left = len; // left는 맨 오른쪽에서 왼쪽으로 하나씩 이동한다.
+
+	while (left > 0)
+	{
+		received = recv(s, ptr, left, flags); // ptr에서 left만큼 받는다
+		if (received == SOCKET_ERROR)
+			return SOCKET_ERROR;
+
+		else if (received == 0)		// 정상 종료
+			break;
+
+		left -= received; // received(받은 만큼) 받을 데이터를 줄인다.
+		ptr += received; // received(받은 만큼) 위치를 옮긴다.
+	}
+
+	return (len - left);
+}
 ////////////////////////////////////////////////////////////////////////////////////////////////////////
 st_Account* AddAccount(WCHAR *szName, UINT64 AccountNo)
 {
@@ -94,7 +136,7 @@ int DeleteFriend(UINT64 From, UINT64 To)
 ////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 
-int DeleteFriendRequest(UINT64& From, UINT64& To)
+BYTE DeleteFriendRequest(UINT64& From, UINT64& To)
 {
 	auto iter = g_RequestFriendMap.begin();
 	pair<multimap<UINT64, st_FriendRequest *>::iterator,
@@ -251,9 +293,6 @@ bool NetworkInit()
 		return false;
 	}
 
-	u_long on = 1;
-	ioctlsocket(g_ListenSocket, FIONBIO, &on);
-
 	wprintf(L"Server Open.! \n");
 
 
@@ -262,7 +301,17 @@ bool NetworkInit()
 void DisconnectClient(const UINT64 &UserNo)
 {
 	st_CLIENT *pClient = FindClient(UserNo);
+
+	if (pClient == nullptr)
+		return;
+
+	WCHAR szIP[16];
+	InetNtop(AF_INET, &pClient->ConnectAdr.sin_addr, szIP, 16);
+	wprintf(L"Disconnected : IP:[%s:%d]UserNo[%d] Socket[%d]  \n", szIP, ntohs(pClient->ConnectAdr.sin_port), UserNo, pClient->Socket);
+	closesocket(pClient->Socket);
 	g_ClientMap.erase(UserNo);
+	g_ClientNo--;
+
 	delete pClient;
 }
 void NetworkProcess()
@@ -315,9 +364,9 @@ void NetworkProcess()
 			memset(UserTable_No, -1, sizeof(__int64) * FD_SETSIZE);
 			memset(UserTable_SOCKET, INVALID_SOCKET, sizeof(SOCKET) * FD_SETSIZE);
 			iSocketCount = 0;
+		 // 왜 Sleep 걸면 되냐?
 		}
 	}
-
 	// 전체 클라이언트 for문 종료 후, socketCount 수치가 있다면
 	// 추가적으로 마지막 select 호출을 한다.
 	if (iSocketCount > 0)
@@ -352,7 +401,6 @@ void SelectSocket(DWORD* pTableNo, SOCKET* pTableSocket, FD_SET *pReadSet, FD_SE
 			{
 				if (pTableNo[iCnt] == 0)
 					AcceptProc();
-				
 				else
 					RecvProc(pTableNo[iCnt]);
 			}
@@ -381,6 +429,10 @@ void AcceptProc()
 	pUser->UserNo = g_ClientNo;
 
 	g_ClientMap.insert(map<UINT64, st_CLIENT *>::value_type(g_ClientNo, pUser));
+
+	WCHAR szClientIP[16] = { 0 };
+	InetNtop(AF_INET, &pUser->ConnectAdr.sin_addr, szClientIP, 16);
+	wprintf(L"Accpet - %s:%d Socket : %d \n", szClientIP, ntohs(pUser->ConnectAdr.sin_port), pUser->Socket);
 }
 void SendProc(const UINT64& UserNo)
 {
@@ -394,30 +446,34 @@ void SendProc(const UINT64& UserNo)
 	iSendSize = min(dfRECV_BUFF, iSendSize);
 
 	if (0 >= iSendSize)
-	{
-		pClient->SendQ.Clear();
 		return;
-	}
+
 	int iResult = send(pClient->Socket, pClient->SendQ.GetReadBufferPtr(), iSendSize, 0);
+	g_SendCount++;
 
-
+	
 	if (iResult == SOCKET_ERROR)
 	{
 		DWORD dwError = WSAGetLastError();
 		if (dwError == WSAEWOULDBLOCK)
 			return;
 
-		closesocket(pClient->Socket);
 		DisconnectClient(pClient->UserNo);
 		
 		return;
 	}
-
+	else if (iResult > iSendSize)
+	{
+		wprintf(L"uncomplete Sended \n");
+		return;
+	}
 	pClient->SendQ.MoveReadPos(iResult);
 
 }
 void RecvProc(const UINT64& UserNo)
 {
+	char pData[1200];
+
 	st_CLIENT *pClient;
 	int iResult;
 
@@ -426,13 +482,15 @@ void RecvProc(const UINT64& UserNo)
 	if (pClient == nullptr)
 		return;
 
-	iResult = recv(pClient->Socket, pClient->RecvQ.GetReadBufferPtr(), dfRECV_BUFF, 0);
+
+	iResult = recv(pClient->Socket, pClient->RecvQ.GetWriteBufferPtr(), dfRECV_BUFF, 0);
 	pClient->RecvQ.MoveWritePos(iResult);
+
+	g_RecvCount ++;
 
 	if (SOCKET_ERROR == iResult)
 	{
-		pClient->RecvQ.Clear();
-		closesocket(pClient->Socket);
+		DisconnectClient(pClient->UserNo);
 		return;
 	}
 
@@ -450,13 +508,12 @@ void RecvProc(const UINT64& UserNo)
 
 			if (iResult == -1)
 			{
-				wprintf(L"Packet Error : UserNo %lld \n", pClient->UserNo);
+				wprintf(L"Packet Proc Error \n");
 				return;
 			}
+			
 		}
 	}
-
-	pClient->RecvQ.Clear();
 }
 int CompleteRecvPackcet(st_CLIENT *pClient)
 {
@@ -466,26 +523,30 @@ int CompleteRecvPackcet(st_CLIENT *pClient)
 	if (sizeof(st_PACKET_HEADER) > iRecvSize)
 		return 1;
 
-	BYTE byCode;
-	WORD MsgType;
-	WORD PayloadSize;
 
-	pClient->RecvQ >> byCode;
-	pClient->RecvQ >> MsgType;
-	pClient->RecvQ >> PayloadSize;
+	st_PACKET_HEADER Header;
+	pClient->RecvQ.PeekData((char *)&Header, sizeof(st_PACKET_HEADER));
 
-	if (byCode != dfPACKET_CODE)
+	if (Header.byCode != (BYTE)dfPACKET_CODE)
 		return -1;
 
-	if (PayloadSize + sizeof(st_PACKET_HEADER) > (WORD)iRecvSize)
+	if (Header.wPayloadSize + sizeof(st_PACKET_HEADER) > (WORD)iRecvSize)
 		return 1;
+
+	pClient->RecvQ.MoveReadPos(sizeof(st_PACKET_HEADER));
 
 	CSerializeBuffer Buffer;
 
-	if (PayloadSize != Buffer.PutData(pClient->RecvQ.GetReadBufferPtr(), PayloadSize))
+	if (Header.wPayloadSize != Buffer.PutData(pClient->RecvQ.GetReadBufferPtr(), Header.wPayloadSize))
 		return -1;
 
-	if (!PacketProc(pClient, MsgType, &Buffer))
+	if (pClient->RecvQ.MoveReadPos(Header.wPayloadSize) != Header.wPayloadSize)
+	{
+		wprintf(L"Move Read Pos Error \n");
+		return -1;
+	}
+
+	if (!PacketProc(pClient, Header.wMsgType, &Buffer))
 		return -1;
 
 	return 0;
@@ -528,12 +589,18 @@ bool PacketProc(st_CLIENT *pClient, const WORD& MsgType, CSerializeBuffer *Buffe
 		return ReqFriendAgree(pClient, Buffer);
 		break;
 	case df_REQ_STRESS_ECHO:
+		return ReqStressEcho(pClient, Buffer);
 		break;
+	default:
+		wprintf(L"Packet Error !!!!!!!!!!!!!!!!!!!!\n");
+		wprintf(L"Packet Error !!!!!!!!!!!!!!!!!!!!\n");
+		wprintf(L"Packet Error !!!!!!!!!!!!!!!!!!!!\n");
+		return false;
 	}
 	return true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////////
-// Check
+
 bool ReqAddAccount(st_CLIENT *pClient, CSerializeBuffer *Buffer)  
 {
 	WCHAR szName[dfNICK_MAX_LEN];
@@ -543,7 +610,7 @@ bool ReqAddAccount(st_CLIENT *pClient, CSerializeBuffer *Buffer)
 
 	return ResAddAccount(pClient, pAccount);
 }		
-// Check
+
 bool ResAddAccount(st_CLIENT *pClient, st_Account *pAccount)	// Check
 {
 	st_PACKET_HEADER Header;
@@ -556,7 +623,7 @@ bool ResAddAccount(st_CLIENT *pClient, st_Account *pAccount)	// Check
 
 	return true;
 }
-// Check
+
 bool ReqLogin(st_CLIENT *pClient, CSerializeBuffer *Buffer)	// Check
 {
 	UINT64 ReqloginAccountNo;
@@ -569,54 +636,55 @@ bool ReqLogin(st_CLIENT *pClient, CSerializeBuffer *Buffer)	// Check
 
 	return ResLogin(pClient);
 }
-// Check
+
 bool ResLogin(st_CLIENT *pClient)	// Check
 {
 	st_PACKET_HEADER Header;
-	CSerializeBuffer Buffer;
 	Header.byCode = dfPACKET_CODE;
 	Header.wMsgType = df_RES_LOGIN;
 	st_Account *pAccount = pClient->pAccount;
+	CRingBuffer Buffer;
 
 	if (pAccount == nullptr)
 	{
-		Buffer << static_cast<__int64>(0);
+		UINT64 T = 0;
+		Buffer.Put(reinterpret_cast<char *>(&T), sizeof(UINT64));
 	}
 	else
 	{
-		Buffer << static_cast<__int64>(pAccount->AccountNo);
-		Buffer.PutData(reinterpret_cast<char *>(pAccount->szID), dfNICK_MAX_LEN * 2);
+		Buffer.Put(reinterpret_cast<char *>(&pAccount->AccountNo), sizeof(UINT64));
+		Buffer.Put(reinterpret_cast<char *>(pAccount->szID), dfNICK_MAX_LEN * 2);
 	}
 
-	Header.wPayloadSize = Buffer.GetDataSize();
+	Header.wPayloadSize = Buffer.GetUseSize();
 
 	pClient->SendQ.PutData(reinterpret_cast<char *>(&Header), sizeof(st_PACKET_HEADER));
 	pClient->SendQ.PutData(Buffer.GetBufferPtr(), Header.wPayloadSize);
 
 	return true;
 }
-// Check
+
 bool ReqAccountList(st_CLIENT *pClient, CSerializeBuffer *Buffer)	// Check
 {
 	return ResAccountList(pClient);
 }
-// Check
+
 bool ResAccountList(st_CLIENT *pClient)	// Check
 {
 	UINT Count = g_AccountMap.size();
-	CSerializeBuffer Buffer;
-	Buffer << static_cast<int>(Count);
+	CRingBuffer Buffer(dfRECV_BUFF);
+	Buffer.Put(reinterpret_cast<char *>(&Count), sizeof(UINT));
 
 	for_each(g_AccountMap.begin(), g_AccountMap.end(), [&Buffer](pair<UINT64, st_Account *> pairs)
 	{
-		Buffer << static_cast<__int64>(pairs.second->AccountNo);
-		Buffer.PutData(reinterpret_cast<char *>(pairs.second->szID), dfNICK_MAX_LEN * 2);
+		Buffer.Put(reinterpret_cast<char *>(&pairs.second->AccountNo),sizeof(UINT64));
+		Buffer.Put(reinterpret_cast<char *>(pairs.second->szID), dfNICK_MAX_LEN * 2);
 	});
 
 	st_PACKET_HEADER Header;
 	Header.byCode = dfPACKET_CODE;
 	Header.wMsgType = df_RES_ACCOUNT_LIST;
-	Header.wPayloadSize = Buffer.GetDataSize();
+	Header.wPayloadSize = Buffer.GetUseSize();
 
 	pClient->SendQ.PutData(reinterpret_cast<char *>(&Header), sizeof(st_PACKET_HEADER));
 	pClient->SendQ.PutData(Buffer.GetBufferPtr(), Header.wPayloadSize);
@@ -634,7 +702,7 @@ bool ResFriendList(st_CLIENT *pClient, st_Account* Account)
 	auto iter = g_FriendMap.begin();
 	UINT64& AccountNo = Account->AccountNo;
 	UINT UserCount = 0;
-	CSerializeBuffer Buffer;
+	CRingBuffer Buffer(dfRECV_BUFF);
 
 	pair<multimap<UINT64, st_Friend*>::iterator, 
 		multimap<UINT64, st_Friend*>::iterator> range;
@@ -647,24 +715,24 @@ bool ResFriendList(st_CLIENT *pClient, st_Account* Account)
 		{
 			UserCount++;
 
-			Buffer << static_cast<__int64>(iter->second->ToAccountNo);
+			Buffer.Put(reinterpret_cast<char *>(&iter->second->ToAccountNo), sizeof(UINT64));
 			st_Account *pTemp = FindAccount(iter->second->ToAccountNo);
 
-			Buffer.PutData(reinterpret_cast<char *>(pTemp->szID), dfNICK_MAX_LEN * 2);
+			Buffer.Put(reinterpret_cast<char *>(pTemp->szID), dfNICK_MAX_LEN * 2);
 		}
 	}
 
 	st_PACKET_HEADER Header;
 	Header.byCode = dfPACKET_CODE;
 	Header.wMsgType = df_RES_FRIEND_LIST;
-	Header.wPayloadSize = Buffer.GetDataSize() + sizeof(UINT);
+	Header.wPayloadSize = Buffer.GetUseSize() + sizeof(UINT);
 
 	pClient->SendQ.PutData(reinterpret_cast<char *>(&Header), sizeof(st_PACKET_HEADER));
 	pClient->SendQ << static_cast<int>(UserCount);
-	pClient->SendQ.PutData(Buffer.GetBufferPtr(), Buffer.GetDataSize());
+	pClient->SendQ.PutData(Buffer.GetBufferPtr(), Buffer.GetUseSize());
 	return true;
 }
-// 친구요청 보낸 목록  요청
+
 bool ReqFriendRequestList(st_CLIENT *pClient, CSerializeBuffer *Buffer)
 {
 	return ResFriendRequestList(pClient);
@@ -674,7 +742,7 @@ bool ResFriendRequestList(st_CLIENT *pClient)
 	auto iter = g_RequestFrom.begin();
 
 	UINT FriendCount = 0;
-	CSerializeBuffer Buffer;
+	CRingBuffer Buffer(dfRECV_BUFF);
 	pair<multimap<UINT64, UINT64>::iterator,
 		multimap<UINT64, UINT64>::iterator> range;
 
@@ -686,10 +754,10 @@ bool ResFriendRequestList(st_CLIENT *pClient)
 		{
 			FriendCount++;
 
-			Buffer << static_cast<__int64>(iter->second);
+			Buffer.Put(reinterpret_cast<char *>(&iter->second), sizeof(UINT64));
 			st_Account *pTemp = FindAccount(iter->second);
 
-			Buffer.PutData(reinterpret_cast<char *>(pTemp->szID), dfNICK_MAX_LEN * 2);
+			Buffer.Put(reinterpret_cast<char *>(pTemp->szID), dfNICK_MAX_LEN * 2);
 			break;
 		}
 	}
@@ -697,27 +765,27 @@ bool ResFriendRequestList(st_CLIENT *pClient)
 	st_PACKET_HEADER Header;
 	Header.byCode = dfPACKET_CODE;
 	Header.wMsgType = df_RES_FRIEND_REQUEST_LIST;
-	Header.wPayloadSize = Buffer.GetDataSize() + sizeof(UINT);
+	Header.wPayloadSize = Buffer.GetUseSize() + sizeof(UINT);
 
 	pClient->SendQ.PutData(reinterpret_cast<char *>(&Header), sizeof(st_PACKET_HEADER));
 	pClient->SendQ << static_cast<int>(FriendCount);
-	pClient->SendQ.PutData(Buffer.GetBufferPtr(), Buffer.GetDataSize());
+	pClient->SendQ.PutData(Buffer.GetBufferPtr(), Buffer.GetUseSize());
 
 	return true;
 
 }
-// 친구요청 받은거 목록  요청 <일단 되는듯>
+
 bool ReqFriendReplyList(st_CLIENT *pClient, CSerializeBuffer *Buffer)
 {
 	// pClient의 계정번호와 같은지 확인 해야된다.
 	return ResFriendReplyList(pClient);
 }
-//  <일단 되는듯>
+
 bool ResFriendReplyList(st_CLIENT *pClient)
 {
 	auto iter = g_RequestTo.begin();
 	UINT FriendCount = 0;
-	CSerializeBuffer Buffer;
+	CRingBuffer Buffer(dfRECV_BUFF);
 	pair<multimap<UINT64, UINT64>::iterator,
 		multimap<UINT64, UINT64>::iterator> range;
 
@@ -732,10 +800,10 @@ bool ResFriendReplyList(st_CLIENT *pClient)
 		{
 			FriendCount++;
 
-			Buffer << static_cast<__int64>(iter->second);
+			Buffer.Put(reinterpret_cast<char *>(&iter->second), sizeof(UINT64));
 			st_Account *pTemp = FindAccount(iter->second);
 
-			Buffer.PutData(reinterpret_cast<char *>(pTemp->szID), dfNICK_MAX_LEN * 2);
+			Buffer.Put(reinterpret_cast<char *>(pTemp->szID), dfNICK_MAX_LEN * 2);
 			break;
 		}
 	}
@@ -743,16 +811,16 @@ bool ResFriendReplyList(st_CLIENT *pClient)
 	st_PACKET_HEADER Header;
 	Header.byCode = dfPACKET_CODE;
 	Header.wMsgType = df_RES_FRIEND_REPLY_LIST;
-	Header.wPayloadSize = Buffer.GetDataSize() + sizeof(UINT);
+	Header.wPayloadSize = Buffer.GetUseSize() + sizeof(UINT);
 
 	pClient->SendQ.PutData(reinterpret_cast<char *>(&Header), sizeof(st_PACKET_HEADER));
 	pClient->SendQ << static_cast<int>(FriendCount);
-	pClient->SendQ.PutData(Buffer.GetBufferPtr(), Buffer.GetDataSize());
+	pClient->SendQ.PutData(Buffer.GetBufferPtr(), Buffer.GetUseSize());
 
 	return true;
 }
 
-// 친구관계 끊기
+
 bool ReqFriendRemove(st_CLIENT *pClient, CSerializeBuffer *Buffer)
 {
 	UINT64 FriendAccountNo; // 끊고자하는 계정 번호
@@ -760,6 +828,7 @@ bool ReqFriendRemove(st_CLIENT *pClient, CSerializeBuffer *Buffer)
 
 	return ResFriendRemove(pClient, FriendAccountNo);
 }
+
 bool ResFriendRemove(st_CLIENT *pClient, UINT64& FriendAccountNo)
 {
 	/*
@@ -772,35 +841,37 @@ bool ResFriendRemove(st_CLIENT *pClient, UINT64& FriendAccountNo)
 	 둘다 없다면 df_RESULT_FRIEND_REMOVE_NOTFRIEND
 	 둘다 있다면 df_RESULT_FRIEND_REMOVE_OK
 	*/
-	CSerializeBuffer Buffer;
-
+	CRingBuffer Buffer(dfRECV_BUFF);
 	UINT64 MyAccountNo = pClient->pAccount->AccountNo;
 	
 	int deleteCount = DeleteFriend(MyAccountNo, FriendAccountNo);
-
-	Buffer << static_cast<__int64>(FriendAccountNo);
+	BYTE errCode;
+	Buffer.Put(reinterpret_cast<char *>(&FriendAccountNo), sizeof(UINT64));
 
 	switch (deleteCount)
 	{
 	case 2:
-		Buffer << static_cast<BYTE>(df_RESULT_FRIEND_REMOVE_OK);
+		errCode = (df_RESULT_FRIEND_REMOVE_OK);
 		break;
 	case 0:
-		Buffer << static_cast<BYTE>(df_RESULT_FRIEND_REMOVE_NOTFRIEND);
+		errCode = (df_RESULT_FRIEND_REMOVE_NOTFRIEND);
 		break;
 	}
+	Buffer.Put(reinterpret_cast<char *>(&errCode), sizeof(BYTE));
+
 
 	st_PACKET_HEADER Header;
 	Header.byCode = dfPACKET_CODE;
 	Header.wMsgType = df_RES_FRIEND_REMOVE;
-	Header.wPayloadSize = Buffer.GetDataSize();
+	Header.wPayloadSize = Buffer.GetUseSize();
 
 	pClient->SendQ.PutData(reinterpret_cast<char *>(&Header), sizeof(st_PACKET_HEADER));
-	pClient->SendQ.PutData(Buffer.GetBufferPtr(), Buffer.GetDataSize());
+	pClient->SendQ.PutData(Buffer.GetBufferPtr(), Buffer.GetUseSize());
+
 	return true;
 }
 
-// 친구관계 요청  <일단 되는듯>
+
 bool ReqFriendRequest(st_CLIENT *pClient, CSerializeBuffer *Buffer)
 {
 	UINT64	FriendAccountNo;
@@ -808,12 +879,12 @@ bool ReqFriendRequest(st_CLIENT *pClient, CSerializeBuffer *Buffer)
 
 	return ResFriendRequest(pClient, FriendAccountNo);
 }
-//  <일단 되는듯>
+
 bool ResFriendRequest(st_CLIENT *pClient, UINT64& FriendAccountNo)
 {
 	UINT64 MyAccount = pClient->pAccount->AccountNo;
-	CSerializeBuffer Buffer;
-	int ret;
+	CRingBuffer Buffer(dfRECV_BUFF);
+	BYTE ret;
 
 	if (MyAccount == FriendAccountNo)
 	{
@@ -823,22 +894,22 @@ bool ResFriendRequest(st_CLIENT *pClient, UINT64& FriendAccountNo)
 		ret = AddFriendRequest(MyAccount, FriendAccountNo);
 
 
-	Buffer << static_cast<__int64>(FriendAccountNo);
-	Buffer << static_cast<BYTE>(ret);
+	Buffer.Put(reinterpret_cast<char *>(&FriendAccountNo), sizeof(UINT64));
+	Buffer.Put(reinterpret_cast<char *>(&ret), sizeof(BYTE));
 
 	st_PACKET_HEADER Header;
 	Header.byCode = dfPACKET_CODE;
 	Header.wMsgType = df_RES_FRIEND_REQUEST;
-	Header.wPayloadSize = Buffer.GetDataSize();
+	Header.wPayloadSize = Buffer.GetUseSize();
 
 
 	pClient->SendQ.PutData(reinterpret_cast<char *>(&Header), sizeof(st_PACKET_HEADER));
-	pClient->SendQ.PutData(Buffer.GetBufferPtr(), Buffer.GetDataSize());
+	pClient->SendQ.PutData(Buffer.GetBufferPtr(), Buffer.GetUseSize());
 
 	return true;
 }
 
-// 친구요청 거부
+
 bool ReqFriendDeny(st_CLIENT *pClient, CSerializeBuffer *Buffer)
 {
 	UINT64 FriendAccountNo; // 거부할 계정 번호
@@ -851,39 +922,41 @@ bool ResFriendDeny(st_CLIENT *pClient, UINT64& FriendAccountNo)
 	// 친구 요청을 거부함
 	// g_RequestFrom에서 내 자신의 계정번호, FriendAccountNo를 지운다.
 	// g_RequestTo에서 FriendAccountNo, 내 자신의 계정번호를 지운다.
-	CSerializeBuffer Buffer;
+	CRingBuffer Buffer(dfRECV_BUFF);
 
 	UINT64 MyAccountNo = pClient->pAccount->AccountNo;
-	int delRet = DeleteFriendRequest(FriendAccountNo, MyAccountNo);
+	BYTE delRet = DeleteFriendRequest(FriendAccountNo, MyAccountNo);
 
 
-	Buffer << static_cast<__int64>(FriendAccountNo);
+	Buffer.Put(reinterpret_cast<char *>(&FriendAccountNo), sizeof(UINT64));
 
 	switch (delRet)
 	{
 	case 2:
-		Buffer << static_cast<BYTE>(df_RESULT_FRIEND_DENY_OK);
+		delRet = df_RESULT_FRIEND_DENY_OK;
 		break;
 	case 1:
-		Buffer << static_cast<BYTE>(df_RESULT_FRIEND_DENY_FAIL);
+		delRet = (df_RESULT_FRIEND_DENY_FAIL);
 		break;
 	case 0:
-		Buffer << static_cast<BYTE>(df_RESULT_FRIEND_DENY_NOTFRIEND);
+		delRet = (df_RESULT_FRIEND_DENY_NOTFRIEND);
 		break;
 	}
+
+	Buffer.Put(reinterpret_cast<char *>(&delRet), sizeof(BYTE));
 
 	st_PACKET_HEADER Header;
 	Header.byCode = dfPACKET_CODE;
 	Header.wMsgType = df_RES_FRIEND_DENY;
-	Header.wPayloadSize = Buffer.GetDataSize();
+	Header.wPayloadSize = Buffer.GetUseSize();
 
 	pClient->SendQ.PutData(reinterpret_cast<char *>(&Header), sizeof(st_PACKET_HEADER));
-	pClient->SendQ.PutData(Buffer.GetBufferPtr(), Buffer.GetDataSize());
+	pClient->SendQ.PutData(Buffer.GetBufferPtr(), Buffer.GetUseSize());
 
 	return true;
 }
 
-// 친구요청 취소
+
 bool ReqFriendCancle(st_CLIENT *pClient, CSerializeBuffer *Buffer)
 {
 	UINT64	FriendAccountNo;
@@ -891,40 +964,43 @@ bool ReqFriendCancle(st_CLIENT *pClient, CSerializeBuffer *Buffer)
 
 	return ResFriendCancle(pClient, FriendAccountNo);
 }
+
 bool ResFriendCancle(st_CLIENT *pClient, UINT64& FriendAccountNo)
 {
-	CSerializeBuffer Buffer;
+	CRingBuffer Buffer(dfRECV_BUFF);
 	UINT64& MyAccount = pClient->pAccount->AccountNo;
 
-	int delCnt = DeleteFriendRequest(MyAccount, FriendAccountNo);
+	BYTE delCnt = DeleteFriendRequest(MyAccount, FriendAccountNo);
 
-	Buffer << static_cast<__int64>(FriendAccountNo);
+	Buffer.Put(reinterpret_cast<char *>(&FriendAccountNo), sizeof(UINT64));
 
 	switch (delCnt)
 	{
 	case 0:
-		Buffer << static_cast<BYTE>(df_RESULT_FRIEND_CANCEL_NOTFRIEND);
+		delCnt = (df_RESULT_FRIEND_CANCEL_NOTFRIEND);
 		break;
 	case 1:
-		Buffer << static_cast<BYTE>(df_RESULT_FRIEND_CANCEL_FAIL);
+		delCnt = (df_RESULT_FRIEND_CANCEL_FAIL);
 		break;
 	case 2:
-		Buffer << static_cast<BYTE>(df_RESULT_FRIEND_CANCEL_OK);
+		delCnt = (df_RESULT_FRIEND_CANCEL_OK);
 		break;
 	}
+
+	Buffer.Put(reinterpret_cast<char *>(&delCnt), sizeof(BYTE));
 
 	st_PACKET_HEADER Header;
 	Header.byCode = dfPACKET_CODE;
 	Header.wMsgType = df_RES_FRIEND_CANCEL;
-	Header.wPayloadSize = Buffer.GetDataSize();
+	Header.wPayloadSize = Buffer.GetUseSize();
 
 
 	pClient->SendQ.PutData(reinterpret_cast<char *>(&Header), sizeof(st_PACKET_HEADER));
-	pClient->SendQ.PutData(Buffer.GetBufferPtr(), Buffer.GetDataSize());
+	pClient->SendQ.PutData(Buffer.GetBufferPtr(), Buffer.GetUseSize());
 
 	return true;
 }
-// <일단됨>
+
 bool ReqFriendAgree(st_CLIENT *pClient, CSerializeBuffer *Buffer)
 {
 	UINT64	FriendAccountNo;
@@ -932,37 +1008,79 @@ bool ReqFriendAgree(st_CLIENT *pClient, CSerializeBuffer *Buffer)
 
 	return ResFriendAgree(pClient, FriendAccountNo);
 }
-// <일단됨>
+
 bool ResFriendAgree(st_CLIENT *pClient, UINT64& FriendAccountNo)
 {
-	CSerializeBuffer Buffer;
+	CRingBuffer Buffer(dfRECV_BUFF);
 	UINT64 MyAccount = pClient->pAccount->AccountNo;
 
 	// FriendAccount -> MyAccount으로 온걸 지우고 친구로 추가한다.
-	int retCnt = DeleteFriendRequest(FriendAccountNo, MyAccount);
+	BYTE retCnt = DeleteFriendRequest(FriendAccountNo, MyAccount);
 
-	Buffer << static_cast<__int64>(FriendAccountNo);
+	Buffer.Put(reinterpret_cast<char *>(&FriendAccountNo), sizeof(UINT64));
 
 	switch (retCnt)
 	{
 	case 2:
 	case 1:
-		Buffer << static_cast<BYTE>(df_RESULT_FRIEND_AGREE_OK);
+		retCnt = (df_RESULT_FRIEND_AGREE_OK);
 		AddFriend(MyAccount, FriendAccountNo);
 		AddFriend(FriendAccountNo, MyAccount);
 		break;
 	case 0:
-		Buffer << static_cast<BYTE>(df_RESULT_FRIEND_AGREE_NOTFRIEND);
+		retCnt = (df_RESULT_FRIEND_AGREE_NOTFRIEND);
 		break;
 	}
+
+	Buffer.Put(reinterpret_cast<char *>(&retCnt), sizeof(BYTE));
 
 	st_PACKET_HEADER Header;
 	Header.byCode = dfPACKET_CODE;
 	Header.wMsgType = df_RES_FRIEND_AGREE;
-	Header.wPayloadSize = Buffer.GetDataSize();
+	Header.wPayloadSize = Buffer.GetUseSize();
 
 	pClient->SendQ.PutData(reinterpret_cast<char *>(&Header), sizeof(st_PACKET_HEADER));
-	pClient->SendQ.PutData(Buffer.GetBufferPtr(), Buffer.GetDataSize());
+	pClient->SendQ.PutData(Buffer.GetBufferPtr(), Buffer.GetUseSize());
+
+	return true;
+}
+
+
+bool ReqStressEcho(st_CLIENT *pClient, CSerializeBuffer *Buffer)
+{
+	WORD szSize;
+	*Buffer >> szSize;
+
+	memset(gData, '\0', szSize);
+	WORD ret = Buffer->GetData(gData, szSize);
+
+	if (szSize  != ret)
+	{
+		wprintf(L"ReqStressEcho: UnComplete Get Data \n");
+		pClient->RecvQ.Clear();		
+		return false;
+	}
+
+
+	return ResStressEcho(pClient, gData, szSize);
+}
+
+bool ResStressEcho(st_CLIENT *pClient, char *szStr, WORD strSize)
+{
+	st_PACKET_HEADER Header;
+	CRingBuffer Buffer(dfRECV_BUFF);
+	pClient->SendQ.Clear();
+
+	Buffer.Put(reinterpret_cast<char *>(&strSize), sizeof(WORD));
+	Buffer.Put(szStr, strSize);
+
+	Header.byCode = dfPACKET_CODE;
+	Header.wMsgType = df_RES_STRESS_ECHO;
+	Header.wPayloadSize = Buffer.GetUseSize();
+
+	
+	pClient->SendQ.PutData(reinterpret_cast<char *>(&Header), sizeof(st_PACKET_HEADER));
+	pClient->SendQ.PutData(Buffer.GetReadBufferPtr(), Header.wPayloadSize);
 
 	return true;
 }

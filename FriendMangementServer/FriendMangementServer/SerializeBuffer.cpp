@@ -6,6 +6,7 @@
 CSerializeBuffer::CSerializeBuffer()
 {
 	m_chpBuffer = new char[eBUFFER_DEFAULT];
+	ZeroMemory(m_chpBuffer, eBUFFER_DEFAULT);
 	m_iDataSize = 0;
 	m_iBufferSize = eBUFFER_DEFAULT;
 
@@ -16,6 +17,7 @@ CSerializeBuffer::CSerializeBuffer()
 CSerializeBuffer::CSerializeBuffer(int iBufferSize)
 {
 	m_chpBuffer = new char[iBufferSize];
+	ZeroMemory(m_chpBuffer, iBufferSize);
 	m_iDataSize = 0;
 	m_iBufferSize = iBufferSize;
 
@@ -32,18 +34,19 @@ CSerializeBuffer::~CSerializeBuffer()
 
 void CSerializeBuffer::Release(void)
 {
-	delete[] m_chpBuffer;
-
 	m_chpReadPos = nullptr;
 	m_chpWritePos = nullptr;
+
 	m_iDataSize = 0;
 	m_iBufferSize = 0;
+
+	delete []m_chpBuffer;
 }
 void	CSerializeBuffer::Clear(void)
 {
 	m_chpReadPos = m_chpBuffer;
 	m_chpWritePos = m_chpBuffer;
-
+	ZeroMemory(m_chpBuffer, eBUFFER_DEFAULT);
 	m_iDataSize = 0;
 }
 
@@ -64,9 +67,24 @@ int	CSerializeBuffer::MoveReadPos(int iSize)
 	m_chpReadPos += CopiedSize;
 	m_iDataSize -= CopiedSize;
 
+	if (m_chpReadPos == m_chpWritePos)
+		Clear();
+
 	return CopiedSize;
 }
 
+int	CSerializeBuffer::PeekData(char *chrSrc, int iSrcSize)
+{
+	int Usage = m_chpWritePos - m_chpReadPos;
+	if (Usage == 0)
+		return 0;
+
+	int GetDataSize = min(iSrcSize, Usage);
+
+	memcpy_s(chrSrc, GetDataSize, m_chpReadPos, GetDataSize);
+
+	return GetDataSize;
+}
 int	CSerializeBuffer::GetData(char *chpDest, int iSize)
 {
 	int Usage = m_chpWritePos - m_chpReadPos;

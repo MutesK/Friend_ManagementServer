@@ -5,9 +5,10 @@
 #include <WinSock2.h>
 #include <WS2tcpip.h>
 #include "Protocol.h"
+#include "RingBuffer.h"
 #include "SerializeBuffer.h"
 
-#define dfRECV_BUFF 20000
+#define dfRECV_BUFF 1100
 
 
 struct st_Account
@@ -42,6 +43,10 @@ struct st_CLIENT  // 계정
 };
 
 bool NetworkInit();
+void Draw();
+void NetworkClear();
+
+int recvn(SOCKET s, char *buf, int len, int flags);
 
 st_CLIENT* FindClient(const UINT64 &UserNo);
 
@@ -67,7 +72,7 @@ int DeleteFriend(UINT64 From, UINT64 To);
 // 요청 함수
 BYTE FindFriendRequest(UINT64& From, UINT64& To);
 BYTE AddFriendRequest(UINT64 From, UINT64 To);
-int DeleteFriendRequest(UINT64& From, UINT64& To);
+BYTE DeleteFriendRequest(UINT64& From, UINT64& To);
 ///////////////////////////////////////////////////////////////////////////////
 // Request 패킷 처리 함수
 bool ReqAddAccount(st_CLIENT *pClient, CSerializeBuffer *Buffer);
@@ -81,6 +86,7 @@ bool ReqFriendRequest(st_CLIENT *pClient, CSerializeBuffer *Buffer);
 bool ReqFriendDeny(st_CLIENT *pClient, CSerializeBuffer *Buffer);
 bool ReqFriendCancle(st_CLIENT *pClient, CSerializeBuffer *Buffer);
 bool ReqFriendAgree(st_CLIENT *pClient, CSerializeBuffer *Buffer);
+bool ReqStressEcho(st_CLIENT *pClient, CSerializeBuffer *Buffer);
 ///////////////////////////////////////////////////////////////////////////////
 // Response 패킷 처리 함수
 bool ResAddAccount(st_CLIENT *pClient, st_Account *pAccount);
@@ -94,4 +100,5 @@ bool ResFriendRequest(st_CLIENT *pClient, UINT64& FriendAccountNo);
 bool ResFriendDeny(st_CLIENT *pClient, UINT64& FriendAccountNo);
 bool ResFriendCancle(st_CLIENT *pClient, UINT64& FriendAccountNo);
 bool ResFriendAgree(st_CLIENT *pClient, UINT64& FriendAccountNo);
+bool ResStressEcho(st_CLIENT *pClient, char *szStr, WORD strSize);
 ///////////////////////////////////////////////////////////////////////////////

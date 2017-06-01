@@ -30,6 +30,9 @@
     <ClInclude Include="json.h">
       <Filter>헤더 파일</Filter>
     </ClInclude>
+    <ClInclude Include="RingBuffer.h">
+      <Filter>Network</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Server.cpp">
@@ -43,6 +46,9 @@
     </ClCompile>
     <ClCompile Include="json.cpp">
       <Filter>소스 파일</Filter>
+    </ClCompile>
+    <ClCompile Include="RingBuffer.cpp">
+      <Filter>Network</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>

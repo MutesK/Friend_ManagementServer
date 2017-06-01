@@ -4,7 +4,6 @@
 
 /*---------------------------------------------------------------
 
-Aya Library - Packet.
 
 네트워크 패킷용 클래스.
 간편하게 패킷에 순서대로 데이타를 In, Out 한다.
@@ -34,12 +33,11 @@ class CSerializeBuffer
 public:
 
 	/*---------------------------------------------------------------
-	AyaPacket Enum.
 
 	----------------------------------------------------------------*/
-	enum enAYA_PACKET
+	enum en_PACKET
 	{
-		eBUFFER_DEFAULT = 20000		// 패킷의 기본 버퍼 사이즈.
+		eBUFFER_DEFAULT = 10000		// 패킷의 기본 버퍼 사이즈.
 	};
 
 	//////////////////////////////////////////////////////////////////////////
@@ -173,7 +171,7 @@ public:
 	int		PutData(char *chpSrc, int iSrcSize);
 
 
-
+	int		PeekData(char *chrSrc, int iSrcSize);
 
 protected:
 
