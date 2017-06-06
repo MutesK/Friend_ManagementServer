@@ -1,4 +1,5 @@
 #include "Server.h"
+#include "MemoryPool.h"
 #include <map>
 #include <algorithm>
 using namespace std;
@@ -23,46 +24,37 @@ UINT g_SendCount = 0;
 
 map<UINT64, st_CLIENT *> g_ClientMap;
 map<UINT64, st_Account *> g_AccountMap;
+CMemoryPool<st_CLIENT> g_ClientPool(3000, true);
 
 void Draw()
 {
-	wprintf(L"Connected : %d \n", g_ClientNo);
-
 	if (g_ClientNo > 0)
 	{
-		wprintf(L"ProcessCount: Send[%d Cnt/Sec], Recv[%d Cnt/Sec], Total[%d Cnt/Sec]  \n", g_RecvCount, g_SendCount, g_RecvCount + g_SendCount);
+		wprintf(L"ProcessCount: Recv[%d Cnt/Sec] \n", g_RecvCount);
 		g_RecvCount = 0;
 		g_SendCount = 0;
+	}
+	else
+	{
+		wprintf(L"Connected : %d \n", g_ClientNo);
 	}
 }
 void NetworkClear()
 {
-	for_each(g_ClientMap.begin(), g_ClientMap.end(), [](pair<UINT64, st_CLIENT *> pairs)
+	auto begin = g_ClientMap.begin();
+	auto end = g_ClientMap.end();
+
+	for (auto iter = begin; iter != end; )
 	{
-		DisconnectClient(pairs.first);
-	});
-}
-int recvn(SOCKET s, char *buf, int len, int flags)
-{
-	int received; // recv 함수의 리턴값
-	char *ptr = buf; // buf index pointer
-	int left = len; // left는 맨 오른쪽에서 왼쪽으로 하나씩 이동한다.
+		st_CLIENT *pClient = (*iter).second;
 
-	while (left > 0)
-	{
-		received = recv(s, ptr, left, flags); // ptr에서 left만큼 받는다
-		if (received == SOCKET_ERROR)
-			return SOCKET_ERROR;
+		closesocket(pClient->Socket);
+		iter = g_ClientMap.erase(iter);
 
-		else if (received == 0)		// 정상 종료
-			break;
-
-		left -= received; // received(받은 만큼) 받을 데이터를 줄인다.
-		ptr += received; // received(받은 만큼) 위치를 옮긴다.
+		g_ClientPool.Free(pClient);
 	}
-
-	return (len - left);
 }
+
 ////////////////////////////////////////////////////////////////////////////////////////////////////////
 st_Account* AddAccount(WCHAR *szName, UINT64 AccountNo)
 {
@@ -312,7 +304,7 @@ void DisconnectClient(const UINT64 &UserNo)
 	g_ClientMap.erase(UserNo);
 	g_ClientNo--;
 
-	delete pClient;
+	g_ClientPool.Free(pClient);
 }
 void NetworkProcess()
 {
@@ -322,13 +314,12 @@ void NetworkProcess()
 	SOCKET UserTable_SOCKET[FD_SETSIZE];
 	int iSocketCount = 0;
 
-
 	FD_SET RSet;
 	FD_SET WSet;
 
 	FD_ZERO(&RSet);
 	FD_ZERO(&WSet);
-	memset(UserTable_No, -1, sizeof(__int64) * FD_SETSIZE);
+	memset(UserTable_No, -1, sizeof(DWORD) * FD_SETSIZE);
 	memset(UserTable_SOCKET, INVALID_SOCKET, sizeof(SOCKET) *FD_SETSIZE);
 
 	// 리슨소켓은 0으로 함.
@@ -338,7 +329,9 @@ void NetworkProcess()
 	iSocketCount++;
 
 	// 리슨소켓 및 접속중인 모든 클라이언트에 대해 SOCKET 체크
-	for (auto iter = g_ClientMap.begin(); iter != g_ClientMap.end();)
+	auto begin = g_ClientMap.begin();
+	auto end = g_ClientMap.end();
+	for (auto iter = begin; iter != end;)
 	{
 		pClient = iter->second;
 		iter++;
@@ -364,7 +357,6 @@ void NetworkProcess()
 			memset(UserTable_No, -1, sizeof(__int64) * FD_SETSIZE);
 			memset(UserTable_SOCKET, INVALID_SOCKET, sizeof(SOCKET) * FD_SETSIZE);
 			iSocketCount = 0;
-		 // 왜 Sleep 걸면 되냐?
 		}
 	}
 	// 전체 클라이언트 for문 종료 후, socketCount 수치가 있다면
@@ -415,13 +407,13 @@ void SelectSocket(DWORD* pTableNo, SOCKET* pTableSocket, FD_SET *pReadSet, FD_SE
 void AcceptProc()
 {
 	st_CLIENT *pUser = nullptr;
-	pUser = new st_CLIENT;
+	pUser = g_ClientPool.Alloc();
 	int addrlen = sizeof(pUser->ConnectAdr);
 
 	pUser->Socket = accept(g_ListenSocket, reinterpret_cast<SOCKADDR *>(&pUser->ConnectAdr), &addrlen);
 	if (pUser->Socket == INVALID_SOCKET)
 	{
-		delete pUser;
+		g_ClientPool.Free(pUser);
 		return;
 	}
 	g_ClientNo++;
@@ -472,8 +464,6 @@ void SendProc(const UINT64& UserNo)
 }
 void RecvProc(const UINT64& UserNo)
 {
-	char pData[1200];
-
 	st_CLIENT *pClient;
 	int iResult;
 
@@ -482,11 +472,10 @@ void RecvProc(const UINT64& UserNo)
 	if (pClient == nullptr)
 		return;
 
-
 	iResult = recv(pClient->Socket, pClient->RecvQ.GetWriteBufferPtr(), dfRECV_BUFF, 0);
 	pClient->RecvQ.MoveWritePos(iResult);
 
-	g_RecvCount ++;
+	g_RecvCount++;
 
 	if (SOCKET_ERROR == iResult)
 	{
@@ -555,6 +544,9 @@ bool PacketProc(st_CLIENT *pClient, const WORD& MsgType, CSerializeBuffer *Buffe
 {
 	switch (MsgType)
 	{
+	case df_REQ_STRESS_ECHO:
+		return ReqStressEcho(pClient, Buffer);
+		break;
 	case df_REQ_ACCOUNT_ADD:
 		return ReqAddAccount(pClient, Buffer);
 		break;
@@ -587,9 +579,6 @@ bool PacketProc(st_CLIENT *pClient, const WORD& MsgType, CSerializeBuffer *Buffe
 		break;
 	case df_REQ_FRIEND_AGREE:
 		return ReqFriendAgree(pClient, Buffer);
-		break;
-	case df_REQ_STRESS_ECHO:
-		return ReqStressEcho(pClient, Buffer);
 		break;
 	default:
 		wprintf(L"Packet Error !!!!!!!!!!!!!!!!!!!!\n");
@@ -1048,28 +1037,27 @@ bool ResFriendAgree(st_CLIENT *pClient, UINT64& FriendAccountNo)
 
 bool ReqStressEcho(st_CLIENT *pClient, CSerializeBuffer *Buffer)
 {
+
 	WORD szSize;
 	*Buffer >> szSize;
 
-	memset(gData, '\0', szSize);
 	WORD ret = Buffer->GetData(gData, szSize);
+	gData[szSize] = '\0';
 
 	if (szSize  != ret)
 	{
 		wprintf(L"ReqStressEcho: UnComplete Get Data \n");
-		pClient->RecvQ.Clear();		
 		return false;
 	}
-
 
 	return ResStressEcho(pClient, gData, szSize);
 }
 
 bool ResStressEcho(st_CLIENT *pClient, char *szStr, WORD strSize)
 {
+
 	st_PACKET_HEADER Header;
 	CRingBuffer Buffer(dfRECV_BUFF);
-	pClient->SendQ.Clear();
 
 	Buffer.Put(reinterpret_cast<char *>(&strSize), sizeof(WORD));
 	Buffer.Put(szStr, strSize);
@@ -1081,6 +1069,5 @@ bool ResStressEcho(st_CLIENT *pClient, char *szStr, WORD strSize)
 	
 	pClient->SendQ.PutData(reinterpret_cast<char *>(&Header), sizeof(st_PACKET_HEADER));
 	pClient->SendQ.PutData(Buffer.GetReadBufferPtr(), Header.wPayloadSize);
-
 	return true;
 }

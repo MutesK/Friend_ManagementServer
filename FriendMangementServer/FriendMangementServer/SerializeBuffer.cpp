@@ -46,7 +46,7 @@ void	CSerializeBuffer::Clear(void)
 {
 	m_chpReadPos = m_chpBuffer;
 	m_chpWritePos = m_chpBuffer;
-	ZeroMemory(m_chpBuffer, eBUFFER_DEFAULT);
+
 	m_iDataSize = 0;
 }
 

@@ -7,6 +7,15 @@
 #include "Protocol.h"
 #include "RingBuffer.h"
 #include "SerializeBuffer.h"
+#include "Profiler.h"
+
+#ifdef PROFILE_CHECK
+#define PRO_BEGIN(x)  ProfileBegin(x)
+#define PRO_END(x)  ProfileEnd(x)
+#else
+#define PRO_BEGIN(x)
+#define PRO_END(x)
+#endif
 
 #define dfRECV_BUFF 1100
 
@@ -46,7 +55,6 @@ bool NetworkInit();
 void Draw();
 void NetworkClear();
 
-int recvn(SOCKET s, char *buf, int len, int flags);
 
 st_CLIENT* FindClient(const UINT64 &UserNo);
 

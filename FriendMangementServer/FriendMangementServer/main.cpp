@@ -22,15 +22,18 @@ int main()
 
 	while (1)
 	{
-		NetworkProcess();
 
+		NetworkProcess();
+		
 		if (GetAsyncKeyState(0x51) && GetAsyncKeyState(0x39))  // Q + ¼ýÀÚ 9
 		{
 			SaveData();
 			timeEndPeriod(1);
+			ProfileOutText("FreqTest.txt");
 			NetworkClear();
 			return 0;
 		}
+		
 		dwTick = GetTickCount64();
 		if (dwTick - timeTickCount  > 1000)
 		{
@@ -38,5 +41,7 @@ int main()
 			dwTick = 0;
 			timeTickCount = GetTickCount64();
 		}
+
+		Sleep(0);
 	}
 }
