@@ -4,10 +4,10 @@
 
 
 CRingBuffer::CRingBuffer()
-:m_front(0), m_rear(0), m_bufferSize(1100)
+:m_front(0), m_rear(0), m_bufferSize(1000)
 {
-	m_buffer = new char[m_bufferSize];
-	memset(m_buffer, 0, m_bufferSize);
+	m_buffer = new char[1000];
+	memset(m_buffer, 0, 100);
 }
 
 CRingBuffer::CRingBuffer(int iSize)

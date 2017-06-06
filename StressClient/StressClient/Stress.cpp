@@ -23,7 +23,10 @@ void Draw(DWORD nowTick)
 	DWORD maxTick = 0;
 	int Count = 0;
 
-	for_each(g_ClientMap.begin(), g_ClientMap.end(), [&RecvCount, &SendCount, &Tick, &nowTick, &minTick, &maxTick, &Count](pair<UINT64, st_CLIENT *> pair)
+	auto begin = g_ClientMap.begin();
+	auto end = g_ClientMap.end();
+
+	for_each(begin, end, [&RecvCount, &SendCount, &Tick, &nowTick, &minTick, &maxTick, &Count](pair<UINT64, st_CLIENT *> pair)
 	{
 		st_CLIENT *pClient = pair.second;
 
@@ -109,7 +112,10 @@ bool NetworkInit()
 
 void NetworkClear()
 {
-	for_each(g_ClientMap.begin(), g_ClientMap.end(), [](pair<UINT64, st_CLIENT *> pairs)
+	auto begin = g_ClientMap.begin();
+	auto end = g_ClientMap.end();
+
+	for_each(begin, end, [](pair<UINT64, st_CLIENT *> pairs)
 	{
 		SOCKET Socket = pairs.second->Socket;
 
@@ -162,8 +168,11 @@ void NetworkProcess()
 	memset(UserTable_No, -1, sizeof(__int64) * FD_SETSIZE);
 	memset(UserTable_SOCKET, INVALID_SOCKET, sizeof(SOCKET) *FD_SETSIZE);
 
+	auto begin = g_ClientMap.begin();
+	auto end = g_ClientMap.end();
+
 	// 리슨소켓 및 접속중인 모든 클라이언트에 대해 SOCKET 체크
-	for (auto iter = g_ClientMap.begin(); iter != g_ClientMap.end();)
+	for (auto iter = begin; iter != end;)
 	{
 		pClient = iter->second;
 		iter++;
@@ -443,7 +452,10 @@ bool ReqStressEcho(st_CLIENT *pClient)
 
 void SendMessages()
 {
-	for_each(g_ClientMap.begin(), g_ClientMap.end(), [](pair<UINT64, st_CLIENT *> pair)
+	auto begin = g_ClientMap.begin();
+	auto end = g_ClientMap.end();
+
+	for_each(begin, end, [](pair<UINT64, st_CLIENT *> pair)
 	{
 		st_CLIENT *pClient = pair.second;
 

@@ -1,12 +1,14 @@
 ﻿  Stress.cpp
-Stress.cpp(139): warning C4101: 'szIP' :참조되지 않은 지역 변수입니다.
-Stress.cpp(163): warning C4309: '인수': 상수 값이 잘립니다.
-Stress.cpp(190): warning C4309: '인수': 상수 값이 잘립니다.
-Stress.cpp(279): warning C4101: 'pData' :참조되지 않은 지역 변수입니다.
-Stress.cpp(440): warning C4244: '=': 'ULONGLONG'에서 'DWORD'(으)로 변환하면서 데이터가 손실될 수 있습니다.
+Stress.cpp(145): warning C4101: 'szIP' :참조되지 않은 지역 변수입니다.
+Stress.cpp(169): warning C4309: '인수': 상수 값이 잘립니다.
+Stress.cpp(199): warning C4309: '인수': 상수 값이 잘립니다.
+Stress.cpp(288): warning C4101: 'pData' :참조되지 않은 지역 변수입니다.
+Stress.cpp(449): warning C4244: '=': 'ULONGLONG'에서 'DWORD'(으)로 변환하면서 데이터가 손실될 수 있습니다.
   코드를 생성하고 있습니다.
-  5 of 205 functions ( 2.4%) were compiled, the rest were copied from previous compilation.
-    4 functions were new in current compilation
-    1 functions had inline decision re-evaluated but remain unchanged
+d:\workspace\stressclient\stressclient\stress.cpp(198): warning C4789: 버퍼 'UserTable_No'(크기: 256바이트)이(가) 오버런됩니다. 512바이트가 오프셋 0부터 쓰입니다.
+d:\workspace\stressclient\stressclient\stress.cpp(168): warning C4789: 버퍼 'UserTable_No'(크기: 256바이트)이(가) 오버런됩니다. 512바이트가 오프셋 0부터 쓰입니다.
+  4 of 205 functions ( 2.0%) were compiled, the rest were copied from previous compilation.
+    0 functions were new in current compilation
+    0 functions had inline decision re-evaluated but remain unchanged
   코드를 생성했습니다.
   StressClient.vcxproj -> D:\Workspace\StressClient\x64\Release\StressClient.exe
